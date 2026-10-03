@@ -1,45 +1,91 @@
 # test-simple-stock-flow-infra
 
-> **Prueba técnica · Ficha ADSO 3413974**
-> Horario: de **9:00 a. m. a 3:00 p. m.** (15:00)
+## 1. Qué es esto
 
-Este repositorio es la **infraestructura** de *Simple Stock Flow*: contenedores, red, volúmenes y el motor de base de datos vacío. **Empieza vacío a propósito**: se construye en el fork de cada aprendiz.
+Orquesta el sistema con Docker Compose: la base de datos MySQL 8.4 **vacía** (`db`), la API Laravel
+(`api`) y la app React servida por nginx (`app`). **No** contiene esquema ni datos: ni una línea de DDL.
+Las tablas, las cinco categorías y el administrador inicial los crea la API al arrancar.
 
-## Instrucciones
+Los otros cinco repositorios deben estar clonados como **hermanos** de este: el compose construye desde
+`../test-simple-stock-flow-api` y `../test-simple-stock-flow-app`.
 
-Cada aprendiz debe **crear el fork** de los seis repositorios del proyecto y **resolver el proyecto
-con el spec planteado**.
+## 2. Cómo se levanta
 
-1. Hacer fork, a su cuenta de GitHub, de cada repositorio de la tabla del final.
-2. Leer el spec en [`test-simple-stock-flow-docs`](https://github.com/code-sena/test-simple-stock-flow-docs).
-   Se entrega en dos versiones: `spec-python/` y `spec-.net/`.
-3. Desarrollar en los forks.
+Solo hace falta Docker. Desde esta carpeta:
 
-## El reto se desarrolla con React y PHP (Laravel)
+```
+cp .env.example .env        # en PowerShell: Copy-Item .env.example .env
+```
 
-El spec está escrito para Python y para .NET, pero el reto **no** se hace en esos lenguajes:
+Rellena en `.env` todos los valores vacíos. Para generar `APP_KEY` y `JWT_SIGNING_KEY` sin instalar nada:
 
-| Capa | Tecnología del reto |
-|---|---|
-| Frontend | React |
-| Backend | PHP con Laravel |
+```
+docker run --rm php:8.3-cli php -r 'echo "base64:".base64_encode(random_bytes(32)),PHP_EOL;'
+docker run --rm php:8.3-cli php -r 'echo bin2hex(random_bytes(32)),PHP_EOL;'
+```
 
-Lo que el spec define sobre el negocio —historias, criterios de aceptación, reglas, contrato de la
-API, modelo de datos— se respeta. Lo que define sobre la tecnología se traduce a React y Laravel.
+Luego:
 
-## La prueba no consiste en escribir el código
+```
+docker compose up -d --build --wait
+```
 
-El propósito principal es ver la **capacidad de desempeño con SDD** (*Spec-Driven Development*,
-desarrollo guiado por especificación): cómo se lee, se interpreta y se aplica una especificación
-para llevarla a un stack distinto. El código es el medio, no el fin.
+La app queda en `http://localhost:8080` (o el `APP_PORT` que fijes). Es el único puerto publicado.
 
-## Los seis repositorios
+**Modo desarrollo** (publica la API en `:8000` y la base en `:3306`):
 
-| Repositorio | Qué va ahí |
-|---|---|
-| [`test-simple-stock-flow-docs`](https://github.com/code-sena/test-simple-stock-flow-docs) | El spec: `spec-python/` y `spec-.net/` |
-| [`test-simple-stock-flow-api`](https://github.com/code-sena/test-simple-stock-flow-api) | Backend en PHP (Laravel) |
-| [`test-simple-stock-flow-app`](https://github.com/code-sena/test-simple-stock-flow-app) | Frontend en React |
-| [`test-simple-stock-flow-page`](https://github.com/code-sena/test-simple-stock-flow-page) | Sitio público estático de presentación |
-| [`test-simple-stock-flow-infra`](https://github.com/code-sena/test-simple-stock-flow-infra) | Contenedores, red, volúmenes y motor de base de datos vacío |
-| [`test-simple-stock-flow-tool`](https://github.com/code-sena/test-simple-stock-flow-tool) | Utilidades: sembrador de datos de demostración |
+```
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build --wait
+```
+
+No mezcles los dos modos sobre el mismo arranque: pasar de uno a otro recrea el contenedor de la API y le
+quita el puerto publicado sin avisar.
+
+### Variables
+
+| Variable | Qué hace | Valor por defecto |
+|---|---|---|
+| `APP_PORT` | Puerto publicado de la app | `8080` |
+| `CORS_ORIGINS` | Orígenes permitidos por la API | `http://localhost:8080` |
+| `JWT_LIFETIME_MINUTES` | Vigencia del token | `60` |
+| `DB_DATABASE`, `DB_USERNAME` | Base y usuario de la aplicación | `stockflow` |
+| `DB_PASSWORD`, `DB_ROOT_PASSWORD` | Claves de la base | **ninguno** |
+| `APP_KEY` | Clave que exige Laravel | **ninguno** |
+| `JWT_SIGNING_KEY` | Clave de firma del token | **ninguno** |
+| `ADMIN_EMAIL`, `ADMIN_PASSWORD` | Credenciales del administrador inicial | **ninguno** |
+
+Ningún secreto tiene valor por defecto: si falta uno, `docker compose` falla nombrándolo.
+
+## 3. Dónde están los datos
+
+- **Base:** `stockflow` · **usuario:** `stockflow` · **puerto:** `3306` (solo con el modo desarrollo).
+- Las claves salen de `DB_PASSWORD` y `DB_ROOT_PASSWORD` en tu `.env`.
+- Para mirar las filas:
+
+```
+docker compose exec db mysql -u stockflow -p stockflow
+```
+
+- Tras el primer arranque deben existir 5 filas en `category` y 1 en `user`.
+- Los datos persisten en el volumen `dbdata` y las imágenes en el volumen `media`.
+
+## 4. Cómo se prueba
+
+`verify.sh` comprueba el sistema desde fuera, con la pila ya levantada. Solo necesita Docker, que lo
+ejecuta en un contenedor (la carpeta superior se monta para ver los repositorios hermanos):
+
+```
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$(pwd)/..":/work -w /work/test-simple-stock-flow-infra docker:cli sh verify.sh
+```
+
+En PowerShell, sustituye `"$(pwd)/.."` por `"${PWD}\.."`. Termina con código 0 solo si todo pasa.
+
+## 5. Qué falta
+
+- `verify.sh` no puede pasar en verde hasta que existan las imágenes de `api` y `app`: el compose las
+  construye desde sus repositorios, que hoy están vacíos.
+- Las comprobaciones de catálogo, ventas y reporte las cubren los tests de `api` y la verificación de
+  extremo a extremo (T-18), no este guion.
+- El contrato que `api` y `app` deben cumplir con este compose: `api` escucha en el puerto 8000, tiene
+  `curl` instalado para su healthcheck y responde `GET /health`; `app` escucha en el puerto 80 y proxea
+  `/api/` y `/media/` hacia `api:8000`.
